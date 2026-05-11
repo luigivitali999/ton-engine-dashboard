@@ -20,6 +20,7 @@ Environment variables required:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -272,6 +273,7 @@ def run_ingest() -> int:
     }).execute()
     run_id = run_record.data[0]["id"]
     stats = RunStats()
+    skipped_diagnostic: list[dict] = []  # one-off: record skipped link names for filter tuning
 
     try:
         log.info("Pulling /v1/creators ...")
@@ -281,7 +283,8 @@ def run_ingest() -> int:
 
         for creator in creators:
             creator_id = upsert_creator(sb, creator)
-            log.info("· creator %s (%s)", creator_id, creator.get("userName") or "n/a")
+            creator_name = creator.get("userName") or creator.get("name") or "n/a"
+            log.info("· creator %s (%s)", creator_id, creator_name)
 
             for link_type in LINK_TYPES:
                 try:
@@ -301,6 +304,11 @@ def run_ingest() -> int:
                         upsert_link_daily(sb, link, creator_id, link_type, snapshot_date)
                         kept_here += 1
                     else:
+                        skipped_diagnostic.append({
+                            "creator": creator_name,
+                            "type": link_type,
+                            "name": name or "(no name)",
+                        })
                         skipped_here += 1
 
                 stats.links_count += kept_here
@@ -319,6 +327,7 @@ def run_ingest() -> int:
             "links_count": stats.links_count,
             "links_skipped_count": stats.skipped_count,
             "errors": stats.errors or None,
+            "notes": json.dumps({"skipped_links": skipped_diagnostic[:500]}) if skipped_diagnostic else None,
         }).eq("id", run_id).execute()
         return 0
 
