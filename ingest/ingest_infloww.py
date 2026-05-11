@@ -23,10 +23,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterator
 
 import requests
@@ -40,8 +41,20 @@ from supabase import Client, create_client
 INFLOWW_BASE_URL = "https://openapi.infloww.com"
 
 LINK_NAME_KEYWORDS: tuple[str, ...] = ("network", "manu", "tg", "ig", "telegram")
-LINK_TYPES: tuple[str, ...] = ("TRIAL", "TRACKING", "CAMPAIGN")
+LINK_TYPES: tuple[str, ...] = ("TRIAL", "TRACKING")
 PAGE_LIMIT = 100  # API maximum
+
+# Infloww /v1/links defaults startTime to "3 days before endTime", which silently
+# hides links created more than 3 days ago. We pass an explicit 365d lookback
+# (the API's hard cap) to retrieve the full active inventory.
+INGEST_LOOKBACK_DAYS = 365
+
+# Word-boundary keyword matching: keyword must NOT be flanked by ASCII letters.
+# Prevents false positives like "ig" inside "significa", "GRATIS", etc.
+KEYWORD_PATTERN = re.compile(
+    r"(?<![a-zA-Z])(" + "|".join(LINK_NAME_KEYWORDS) + r")(?![a-zA-Z])",
+    re.IGNORECASE,
+)
 
 # Sleep between paginated calls (gentle rate-limit hygiene)
 PAGINATION_DELAY_S = 0.2
@@ -103,11 +116,10 @@ def ms_to_iso(value: Any) -> str | None:
 
 
 def link_passes_keyword_filter(name: str | None) -> bool:
-    """True if the link name contains any of the configured keywords (case-insensitive)."""
+    """True if the link name contains any keyword as a word (not as substring inside another word)."""
     if not name:
         return False
-    n = name.lower()
-    return any(kw in n for kw in LINK_NAME_KEYWORDS)
+    return bool(KEYWORD_PATTERN.search(name))
 
 
 def link_display_name(link: dict) -> str | None:
@@ -162,11 +174,14 @@ class InflowwClient:
     def list_creators(self) -> list[dict]:
         return list(self.paginate("/v1/creators"))
 
-    def list_links(self, creator_id: str, link_type: str) -> list[dict]:
-        return list(self.paginate("/v1/links", {
+    def list_links(self, creator_id: str, link_type: str, start_time: str | None = None) -> list[dict]:
+        params: dict[str, Any] = {
             "creatorId": creator_id,
             "linkType": link_type,
-        }))
+        }
+        if start_time:
+            params["startTime"] = start_time
+        return list(self.paginate("/v1/links", params))
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +279,8 @@ def run_ingest() -> int:
     infloww = InflowwClient(infloww_api_key, infloww_oid)
 
     snapshot_date = datetime.now(timezone.utc).date()
-    log.info("Starting ingest for snapshot_date=%s", snapshot_date.isoformat())
+    lookback_start = (datetime.now(timezone.utc) - timedelta(days=INGEST_LOOKBACK_DAYS)).isoformat()
+    log.info("Starting ingest for snapshot_date=%s (lookback from %s)", snapshot_date.isoformat(), lookback_start)
 
     # Open a run record
     run_record = sb.table("ingest_runs").insert({
@@ -288,7 +304,7 @@ def run_ingest() -> int:
 
             for link_type in LINK_TYPES:
                 try:
-                    links = infloww.list_links(creator_id, link_type)
+                    links = infloww.list_links(creator_id, link_type, start_time=lookback_start)
                 except requests.HTTPError as exc:
                     msg = f"{link_type} for creator {creator_id}: {exc}"
                     log.warning("  ! %s", msg)
