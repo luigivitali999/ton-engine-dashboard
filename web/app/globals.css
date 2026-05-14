@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  /* Colors — Seline Analytics palette */
+  --color-cloud-white: #ffffff;
+  --color-canvas-fog: #fafaf9;
+  --color-slate-text: #0c0a09;
+  --color-ash-gray: #78716c;
+  --color-stone-border: #e5e7eb;
+  --color-platinum-outline: #d6d3d1;
+  --color-steel-gray: #a8a29e;
+  --color-hover-stone: #c9c5c2;
+  --color-ghost-ink: #1c1917;
+  --color-chartwell-blue: #3ba6f1;
+  --color-sky-tint: #c1e1f7;
+
+  /* Typography */
+  --font-inter: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /* Type Scale */
+  --text-caption: 12px;
+  --text-caption--line-height: 1.5;
+  --text-caption--letter-spacing: 0.048px;
+  --text-heading-sm: 18px;
+  --text-heading-sm--line-height: 1.25;
+  --text-heading-sm--letter-spacing: -0.016px;
+  --text-heading: 20px;
+  --text-heading--line-height: 1.2;
+  --text-heading--letter-spacing: -0.017px;
+  --text-heading-lg: 32px;
+  --text-heading-lg--line-height: 1.12;
+  --text-heading-lg--letter-spacing: -0.021px;
+  --text-display: 52px;
+  --text-display--line-height: 1;
+  --text-display--letter-spacing: -0.025px;
+
+  /* Spacing */
+  --spacing: 4px;
+
+  /* Border Radius */
+  --radius-md: 4px;
+  --radius-lg: 10px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-md: rgba(0, 0, 0, 0.05) 0px 4px 16px 0px;
+  --shadow-sm: rgba(0, 0, 0, 0.1) 0px 4px 6px -1px, rgba(0, 0, 0, 0.1) 0px 2px 4px -2px;
+  --shadow-subtle: rgba(0, 0, 0, 0.05) 0px 1px 2px 0px;
+  --shadow-xl: rgba(17, 12, 46, 0.12) 0px 12px 45px 0px;
+}
+
+/* Base reset on top of Tailwind preflight */
+html,
+body {
+  background: var(--color-canvas-fog);
+  color: var(--color-slate-text);
+  font-family: var(--font-inter);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tabular numbers for all KPI / data cells — prevents number-width jitter */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Used by the EfficiencyQuadrant when clicking a point — pulses the
+   corresponding table row for 2 seconds. */
+.link-row-highlight {
+  background: rgba(59, 166, 241, 0.12) !important;
+  animation: link-row-fade 2s ease-out;
+}
+
+@keyframes link-row-fade {
+  0% {
+    background: rgba(59, 166, 241, 0.25);
+  }
+  100% {
+    background: rgba(59, 166, 241, 0);
+  }
+}
