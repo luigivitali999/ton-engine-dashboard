@@ -47,16 +47,6 @@ export async function fetchLinkAggregates(
 ): Promise<LinkAggregate[]> {
   const supabase = createAdminClient();
 
-  // Latest snapshot date globally
-  const { data: latest, error: latestErr } = await supabase
-    .from("links_daily")
-    .select("snapshot_date")
-    .order("snapshot_date", { ascending: false })
-    .limit(1);
-  if (latestErr) throw latestErr;
-  if (!latest || latest.length === 0) return [];
-  const latestDate = latest[0].snapshot_date as string;
-
   // Link master rows
   let linksQ = supabase
     .from("links")
@@ -71,13 +61,12 @@ export async function fetchLinkAggregates(
 
   const linkIds = linkRows.map((l) => l.id as string);
 
-  // Latest snapshot row per link
+  // Latest snapshot per link — independent of date, always the freshest available
   const { data: snapshotRows, error: snapshotErr } = await supabase
-    .from("links_daily")
+    .from("v_latest_snapshot_per_link")
     .select(
       "link_id, sub_count, paying_fans_count, earnings_gross, earnings_net, click_count, subscription_cvr, spend_claim, aeps_net",
     )
-    .eq("snapshot_date", latestDate)
     .in("link_id", linkIds);
   if (snapshotErr) throw snapshotErr;
   const snapshotByLink = new Map(

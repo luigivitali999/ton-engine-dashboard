@@ -230,9 +230,11 @@ def upsert_link_daily(
     creator_id: str,
     link_type: str,
     snapshot_date: date,
+    snapshot_at: datetime,
 ) -> None:
     row = {
         "snapshot_date": snapshot_date.isoformat(),
+        "snapshot_at": snapshot_at.isoformat(),
         "link_id": str(link.get("id")),
         "creator_id": creator_id,
         "link_type": link_type,
@@ -254,7 +256,8 @@ def upsert_link_daily(
         # TRIAL-only
         "spend_claim": parse_percent(link.get("spendClaim")),
     }
-    sb.table("links_daily").upsert(row, on_conflict="snapshot_date,link_id").execute()
+    # The DB has UNIQUE on (snapshot_at, link_id) — multiple snapshots per day are allowed.
+    sb.table("links_daily").upsert(row, on_conflict="snapshot_at,link_id").execute()
 
 
 # ---------------------------------------------------------------------------
@@ -278,9 +281,13 @@ def run_ingest() -> int:
     sb: Client = create_client(supabase_url, supabase_service_role_key)
     infloww = InflowwClient(infloww_api_key, infloww_oid)
 
-    snapshot_date = datetime.now(timezone.utc).date()
+    # Use a single snapshot_at across all rows in this run so they group cleanly.
+    # snapshot_date is derived (date portion of snapshot_at) — kept for backwards
+    # compat with views and queries until we drop it later.
+    snapshot_at = datetime.now(timezone.utc)
+    snapshot_date = snapshot_at.date()
     lookback_start = (datetime.now(timezone.utc) - timedelta(days=INGEST_LOOKBACK_DAYS)).isoformat()
-    log.info("Starting ingest for snapshot_date=%s (lookback from %s)", snapshot_date.isoformat(), lookback_start)
+    log.info("Starting ingest at %s (lookback from %s)", snapshot_at.isoformat(), lookback_start)
 
     # Open a run record
     run_record = sb.table("ingest_runs").insert({
@@ -317,7 +324,7 @@ def run_ingest() -> int:
                     name = link_display_name(link)
                     if link_passes_keyword_filter(name):
                         upsert_link_master(sb, link, creator_id, link_type)
-                        upsert_link_daily(sb, link, creator_id, link_type, snapshot_date)
+                        upsert_link_daily(sb, link, creator_id, link_type, snapshot_date, snapshot_at)
                         kept_here += 1
                     else:
                         skipped_diagnostic.append({

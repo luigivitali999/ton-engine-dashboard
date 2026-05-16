@@ -1,9 +1,10 @@
-name: Daily Infloww ingest
+name: Infloww ingest (every 4h)
 
 on:
   schedule:
-    # 03:00 UTC daily — past Infloww's 2h sync delay on /v1/links
-    - cron: "0 3 * * *"
+    # Every 4 hours UTC = 00, 04, 08, 12, 16, 20 (= 02, 06, 10, 14, 18, 22 Rome).
+    # 6 runs/day × ~4 min × 30 days ≈ 720 min/month, well under the 2000 min free tier.
+    - cron: "0 0,4,8,12,16,20 * * *"
   workflow_dispatch: {}   # allows manual trigger from the Actions tab
 
 jobs:
