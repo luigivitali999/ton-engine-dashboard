@@ -8,6 +8,7 @@ import {
   countExcludedLinks,
   fetchDailyTimeSeries,
   fetchLinkAggregates,
+  fetchRangeAggregates,
   listCreators,
 } from "@/lib/queries";
 import type { TimeRange } from "@/lib/types";
@@ -65,7 +66,7 @@ export default async function DashboardPage({
   const selectedCreatorIds = parseCreators(sp.creators);
   const showExcluded = sp.showExcluded === "1";
 
-  const [creators, links, excludedCount, timeSeries] = await Promise.all([
+  const [creators, links, excludedCount, timeSeries, rangeAgg] = await Promise.all([
     listCreators(),
     fetchLinkAggregates(
       selectedCreatorIds.length > 0 ? selectedCreatorIds : null,
@@ -77,12 +78,19 @@ export default async function DashboardPage({
       selectedCreatorIds.length > 0 ? selectedCreatorIds : null,
       range,
     ),
+    fetchRangeAggregates(
+      selectedCreatorIds.length > 0 ? selectedCreatorIds : null,
+      range,
+    ),
   ]);
 
-  // Aggregate KPIs from the link rows
-  const totalSubs = links.reduce((acc, l) => acc + l.subs, 0);
-  const totalNet = links.reduce((acc, l) => acc + l.earnings_net, 0);
-  const totalGross = links.reduce((acc, l) => acc + l.earnings_gross, 0);
+  // Range-aware KPIs (Subs / Net / Gross / Clicks) — sum of deltas across the
+  // selected time window. For "all" range, these become lifetime totals.
+  const rangeSubs = rangeAgg.subs_delta;
+  const rangeNet = rangeAgg.net_delta;
+  const rangeGross = rangeAgg.gross_delta;
+
+  // Lifetime/stato corrente — non range-aware (link attivi adesso, CVR media adesso)
   const activeLinks = links.length;
   const trialCount = links.filter((l) => l.link_type === "TRIAL").length;
   const trackingCount = links.filter((l) => l.link_type === "TRACKING").length;
@@ -159,14 +167,14 @@ export default async function DashboardPage({
         }}
       >
         <KpiCard
-          label="New subscribers"
-          value={fmtInt(totalSubs)}
+          label={range === "all" ? "Total subscribers" : "New subscribers"}
+          value={fmtInt(Math.round(rangeSubs))}
           hint={`${RANGE_LABELS[range]}`}
         />
         <KpiCard
-          label="Revenue net"
-          value={fmtUSD(totalNet)}
-          hint={`gross ${fmtUSD(totalGross, { compact: true })}`}
+          label={range === "all" ? "Total revenue net" : "Revenue net"}
+          value={fmtUSD(rangeNet)}
+          hint={`gross ${fmtUSD(rangeGross, { compact: true })} · ${RANGE_LABELS[range]}`}
         />
         <KpiCard
           label="Active links"

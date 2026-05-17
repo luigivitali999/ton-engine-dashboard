@@ -19,6 +19,121 @@ function rangeBounds(range: TimeRange): { start: string; end: string } | null {
   return { start: start.toISOString().slice(0, 10), end };
 }
 
+export interface RangeAggregate {
+  subs_delta: number;
+  net_delta: number;
+  gross_delta: number;
+  clicks_delta: number;
+}
+
+/**
+ * Sum daily deltas across the selected range.
+ *
+ * Per (link, day), the hybrid view has the cumulative value at end-of-day.
+ * Daily delta for a link = cumulative_today - cumulative_yesterday.
+ * Range total = sum of deltas across all days in the range.
+ *
+ * Equivalent (and faster) is: sum of (cumulative_at_range_end - cumulative_at_day_before_range_start)
+ * per link, then sum across links. We use this telescoping shortcut to keep
+ * the query small.
+ *
+ * For range="today" we use last_snapshot_today - last_snapshot_yesterday.
+ * For range="all" we use last_snapshot_today (delta from zero).
+ */
+export async function fetchRangeAggregates(
+  creatorIds: string[] | null,
+  range: TimeRange,
+): Promise<RangeAggregate> {
+  const supabase = createAdminClient();
+  const bounds = rangeBounds(range);
+
+  // Day BEFORE the range start (we subtract its cumulative from the range-end cumulative).
+  // For "all" range, before = null and we treat baseline as 0.
+  let beforeDate: string | null = null;
+  let endDate: string;
+  if (bounds) {
+    const start = new Date(bounds.start + "T00:00:00Z");
+    start.setUTCDate(start.getUTCDate() - 1);
+    beforeDate = start.toISOString().slice(0, 10);
+    endDate = bounds.end;
+  } else {
+    endDate = new Date().toISOString().slice(0, 10);
+  }
+
+  // Fetch cumulative at end date and (if applicable) at before date.
+  let endQ = supabase
+    .from("v_daily_cumulative_hybrid")
+    .select("link_id, creator_id, sub_count, earnings_net, earnings_gross, click_count")
+    .eq("excluded", false)
+    .eq("snapshot_date", endDate);
+  if (creatorIds && creatorIds.length > 0) {
+    endQ = endQ.in("creator_id", creatorIds);
+  }
+  const { data: endRows, error: endErr } = await endQ;
+  if (endErr) throw endErr;
+
+  let beforeRowsMap = new Map<string, { subs: number; net: number; gross: number; clicks: number }>();
+  if (beforeDate) {
+    let beforeQ = supabase
+      .from("v_daily_cumulative_hybrid")
+      .select("link_id, sub_count, earnings_net, earnings_gross, click_count")
+      .eq("excluded", false)
+      .eq("snapshot_date", beforeDate);
+    if (creatorIds && creatorIds.length > 0) {
+      beforeQ = beforeQ.in("creator_id", creatorIds);
+    }
+    const { data: beforeRows, error: beforeErr } = await beforeQ;
+    if (beforeErr) throw beforeErr;
+    for (const r of beforeRows ?? []) {
+      const row = r as {
+        link_id: string;
+        sub_count: number | string | null;
+        earnings_net: number | string | null;
+        earnings_gross: number | string | null;
+        click_count: number | string | null;
+      };
+      beforeRowsMap.set(row.link_id, {
+        subs: parseFloat(String(row.sub_count ?? "0")),
+        net: parseFloat(String(row.earnings_net ?? "0")),
+        gross: parseFloat(String(row.earnings_gross ?? "0")),
+        clicks: parseFloat(String(row.click_count ?? "0")),
+      });
+    }
+  }
+
+  let subs_delta = 0;
+  let net_delta = 0;
+  let gross_delta = 0;
+  let clicks_delta = 0;
+  for (const r of endRows ?? []) {
+    const row = r as {
+      link_id: string;
+      sub_count: number | string | null;
+      earnings_net: number | string | null;
+      earnings_gross: number | string | null;
+      click_count: number | string | null;
+    };
+    const endVal = {
+      subs: parseFloat(String(row.sub_count ?? "0")),
+      net: parseFloat(String(row.earnings_net ?? "0")),
+      gross: parseFloat(String(row.earnings_gross ?? "0")),
+      clicks: parseFloat(String(row.click_count ?? "0")),
+    };
+    const beforeVal = beforeRowsMap.get(row.link_id) ?? {
+      subs: 0,
+      net: 0,
+      gross: 0,
+      clicks: 0,
+    };
+    subs_delta += endVal.subs - beforeVal.subs;
+    net_delta += endVal.net - beforeVal.net;
+    gross_delta += endVal.gross - beforeVal.gross;
+    clicks_delta += endVal.clicks - beforeVal.clicks;
+  }
+
+  return { subs_delta, net_delta, gross_delta, clicks_delta };
+}
+
 /** List all creators that have at least one (non-excluded) link in the system. */
 export async function listCreators(): Promise<Creator[]> {
   const supabase = createAdminClient();
