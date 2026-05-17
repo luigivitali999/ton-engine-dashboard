@@ -1,6 +1,16 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const tabs = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/telegram", label: "Telegram" },
+];
 
 export function Nav() {
+  const pathname = usePathname();
+
   return (
     <nav
       style={{
@@ -24,17 +34,27 @@ export function Nav() {
             TON-engine
           </span>
           <div className="flex" style={{ gap: 16, fontSize: 13 }}>
-            <Link
-              href="/dashboard"
-              style={{
-                color: "#0c0a09",
-                borderBottom: "2px solid #3ba6f1",
-                paddingBottom: 4,
-                textDecoration: "none",
-              }}
-            >
-              Dashboard
-            </Link>
+            {tabs.map((t) => {
+              const active =
+                pathname === t.href ||
+                (pathname?.startsWith(t.href + "/") ?? false);
+              return (
+                <Link
+                  key={t.href}
+                  href={t.href}
+                  style={{
+                    color: "#0c0a09",
+                    borderBottom: active
+                      ? "2px solid #3ba6f1"
+                      : "2px solid transparent",
+                    paddingBottom: 4,
+                    textDecoration: "none",
+                  }}
+                >
+                  {t.label}
+                </Link>
+              );
+            })}
           </div>
         </div>
 
