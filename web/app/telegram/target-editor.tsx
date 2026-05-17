@@ -3,7 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function TargetEditor({ initial }: { initial: number }) {
+export function TargetEditor({
+  linkId,
+  initial,
+}: {
+  linkId: string;
+  initial: number;
+}) {
   const router = useRouter();
   const [value, setValue] = useState(String(initial));
   const [saving, setSaving] = useState(false);
@@ -16,7 +22,7 @@ export function TargetEditor({ initial }: { initial: number }) {
       const res = await fetch("/api/telegram/target", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: Number(value) }),
+        body: JSON.stringify({ linkId, target: Number(value) }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -33,46 +39,40 @@ export function TargetEditor({ initial }: { initial: number }) {
   }
 
   return (
-    <div>
-      <div style={{ fontSize: 12, color: "#78716c", marginBottom: 6 }}>
-        Target join
-      </div>
-      <div style={{ display: "flex", gap: 6 }}>
-        <input
-          type="number"
-          min={1}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          style={{
-            flex: 1,
-            padding: "6px 8px",
-            fontSize: 13,
-            border: "1px solid #e5e7eb",
-            borderRadius: 4,
-            minWidth: 0,
-          }}
-        />
-        <button
-          onClick={save}
-          disabled={saving}
-          style={{
-            background: "#3ba6f1",
-            color: "white",
-            border: "none",
-            borderRadius: 4,
-            padding: "6px 12px",
-            fontSize: 12,
-            cursor: saving ? "default" : "pointer",
-            opacity: saving ? 0.6 : 1,
-          }}
-        >
-          {saving ? "..." : "Salva"}
-        </button>
-      </div>
+    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      <input
+        type="number"
+        min={1}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        style={{
+          width: 100,
+          padding: "5px 8px",
+          fontSize: 12,
+          border: "1px solid #e5e7eb",
+          borderRadius: 4,
+        }}
+      />
+      <button
+        onClick={save}
+        disabled={saving}
+        style={{
+          background: "#3ba6f1",
+          color: "white",
+          border: "1px solid #3ba6f1",
+          borderRadius: 4,
+          padding: "5px 12px",
+          fontSize: 12,
+          cursor: saving ? "default" : "pointer",
+          opacity: saving ? 0.6 : 1,
+        }}
+      >
+        {saving ? "..." : "Salva target"}
+      </button>
       {msg && (
-        <div style={{ fontSize: 11, color: "#78716c", marginTop: 6 }}>
+        <span style={{ fontSize: 11, color: "#78716c", marginLeft: 6 }}>
           {msg}
-        </div>
+        </span>
       )}
     </div>
   );

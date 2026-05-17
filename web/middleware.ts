@@ -4,7 +4,6 @@ import { isSessionValid, SESSION_COOKIE_NAME } from "@/lib/session";
 const PUBLIC_PATHS = [
   "/unlock",
   "/api/unlock",
-  "/r",
   "/api/telegram/webhook",
 ];
 
