@@ -6,13 +6,21 @@ import {
   listTrackingLinksForChannel,
   getChannelKpis,
   getTrackingLinkDetail,
+  getDailyBreakdown,
   type TrackingLinkRow,
   type Channel,
   type ChannelKpis,
   type TrackingLinkDetail,
+  type DailyBreakdownRow,
 } from "@/lib/telegram-queries";
-import { TargetEditor } from "./target-editor";
 import { CopyButton } from "./copy-button";
+import { AddChannelDialog } from "./add-channel-dialog";
+import { CreateLinkDialog } from "./create-link-dialog";
+import { EditLinkDialog } from "./edit-link-dialog";
+import { SyncButton } from "./sync-button";
+import { AutoRefresh } from "./auto-refresh";
+
+const BOT_USERNAME = "babysujanbot";
 
 export const dynamic = "force-dynamic";
 
@@ -43,9 +51,12 @@ export default async function TelegramPage({
 
   const selectedLinkId =
     params.link ?? (links.length > 0 ? links[0].id : null);
-  const detail = selectedLinkId
-    ? await getTrackingLinkDetail(selectedLinkId)
-    : null;
+  const [detail, dailyRows] = selectedLinkId
+    ? await Promise.all([
+        getTrackingLinkDetail(selectedLinkId),
+        getDailyBreakdown(selectedLinkId, 30),
+      ])
+    : [null, []];
 
   return (
     <div
@@ -55,6 +66,7 @@ export default async function TelegramPage({
         gap: 20,
       }}
     >
+      <AutoRefresh intervalMs={60_000} />
       <Sidebar
         channels={channels}
         activeChatId={selectedChatId}
@@ -77,6 +89,7 @@ export default async function TelegramPage({
             channelTotalJoins={
               kpis.total_joins_tracked_all_time + kpis.orphan_joins_total
             }
+            dailyRows={dailyRows}
           />
         )}
       </main>
@@ -190,6 +203,7 @@ function Sidebar({
           </Link>
         );
       })}
+      <AddChannelDialog botUsername={BOT_USERNAME} />
       <div
         style={{
           marginTop: 14,
@@ -216,6 +230,8 @@ function ChannelHeader({ channel }: { channel: Channel }) {
         justifyContent: "space-between",
         alignItems: "flex-start",
         marginBottom: 16,
+        gap: 16,
+        flexWrap: "wrap",
       }}
     >
       <div>
@@ -241,8 +257,12 @@ function ChannelHeader({ channel }: { channel: Channel }) {
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <Tag green>webhook attivo</Tag>
-          <Tag>bot admin: @babysujanbot</Tag>
+          <Tag>bot admin: @{BOT_USERNAME}</Tag>
         </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <SyncButton chatId={channel.chat_id} />
+        <CreateLinkDialog chatId={channel.chat_id} buttonStyle="primary" />
       </div>
     </div>
   );
@@ -670,10 +690,12 @@ function LinkDetail({
   detail,
   allLinks,
   channelTotalJoins,
+  dailyRows,
 }: {
   detail: TrackingLinkDetail;
   allLinks: TrackingLinkRow[];
   channelTotalJoins: number;
+  dailyRows: DailyBreakdownRow[];
 }) {
   const { link } = detail;
   const target = link.target_joins;
@@ -782,7 +804,15 @@ function LinkDetail({
           }}
         >
           <CopyButton text={link.invite_link} />
-          <TargetEditor linkId={link.id} initial={target} />
+          <EditLinkDialog
+            linkId={link.id}
+            initial={{
+              label: link.label,
+              target_joins: link.target_joins,
+              promoter_id: link.promoter_id,
+              is_active: link.is_active,
+            }}
+          />
         </div>
       </div>
 
@@ -995,6 +1025,9 @@ function LinkDetail({
           hint={qualityGrade.hint(detail.premium_pct)}
         />
       </div>
+
+      {/* Daily breakdown */}
+      <DailyBreakdown rows={dailyRows} />
 
       {/* Recent joins */}
       <div style={{ marginTop: 18 }}>
@@ -1353,6 +1386,204 @@ function gradeFromPremiumPct(pct: number): {
         ? `${p.toFixed(1)}% premium · molto bassa`
         : "ancora pochi dati",
   };
+}
+
+function DailyBreakdown({ rows }: { rows: DailyBreakdownRow[] }) {
+  // Show most recent day first
+  const sorted = [...rows].sort((a, b) => b.day.localeCompare(a.day));
+  const nonZeroCount = sorted.filter((r) => r.joins > 0).length;
+  const total = sorted.reduce((acc, r) => acc + r.joins, 0);
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          marginBottom: 8,
+        }}
+      >
+        <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>
+          Breakdown giornaliero
+        </h3>
+        <span style={{ fontSize: 11, color: "#a8a29e" }}>
+          ultimi 30 giorni · {total} join in {nonZeroCount} giorni con
+          attività
+        </span>
+      </div>
+      <div
+        style={{
+          background: "#fafaf9",
+          border: "1px solid #e5e7eb",
+          borderRadius: 6,
+          overflow: "hidden",
+          maxHeight: 380,
+          overflowY: "auto",
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            fontSize: 12,
+            borderCollapse: "collapse",
+          }}
+        >
+          <thead
+            style={{
+              position: "sticky",
+              top: 0,
+              background: "#fafaf9",
+              zIndex: 1,
+            }}
+          >
+            <tr style={{ color: "#78716c" }}>
+              <th
+                style={{
+                  textAlign: "left",
+                  fontWeight: 500,
+                  padding: "8px 12px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                Giorno
+              </th>
+              <th
+                style={{
+                  textAlign: "right",
+                  fontWeight: 500,
+                  padding: "8px 12px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                Join
+              </th>
+              <th
+                style={{
+                  textAlign: "right",
+                  fontWeight: 500,
+                  padding: "8px 12px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                Premium
+              </th>
+              <th
+                style={{
+                  textAlign: "right",
+                  fontWeight: 500,
+                  padding: "8px 12px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                % Premium
+              </th>
+              <th
+                style={{
+                  textAlign: "left",
+                  fontWeight: 500,
+                  padding: "8px 12px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                Top lingua
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r) => {
+              const isToday = r.day === new Date().toISOString().slice(0, 10);
+              return (
+                <tr
+                  key={r.day}
+                  style={{
+                    borderBottom: "1px solid #f0efed",
+                    background: isToday ? "rgba(59,166,241,0.04)" : "white",
+                  }}
+                >
+                  <td
+                    style={{
+                      padding: "7px 12px",
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      fontSize: 11,
+                      color: r.joins > 0 ? "#0c0a09" : "#a8a29e",
+                    }}
+                  >
+                    {r.day}
+                    {isToday && (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          fontSize: 9,
+                          color: "#3ba6f1",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        oggi
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    style={{
+                      padding: "7px 12px",
+                      textAlign: "right",
+                      fontWeight: r.joins > 0 ? 500 : 400,
+                      color: r.joins > 0 ? "#0c0a09" : "#a8a29e",
+                    }}
+                  >
+                    {r.joins}
+                  </td>
+                  <td
+                    style={{
+                      padding: "7px 12px",
+                      textAlign: "right",
+                      color: r.premium > 0 ? "#0c0a09" : "#a8a29e",
+                    }}
+                  >
+                    {r.premium}
+                  </td>
+                  <td
+                    style={{
+                      padding: "7px 12px",
+                      textAlign: "right",
+                      color: r.joins > 0 ? "#0c0a09" : "#a8a29e",
+                    }}
+                  >
+                    {r.joins > 0 ? `${r.premium_pct.toFixed(0)}%` : "—"}
+                  </td>
+                  <td
+                    style={{
+                      padding: "7px 12px",
+                      color: r.top_language ? "#0c0a09" : "#a8a29e",
+                    }}
+                  >
+                    {r.top_language?.toUpperCase() || "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function EmptyState() {

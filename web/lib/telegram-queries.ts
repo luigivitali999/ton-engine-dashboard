@@ -445,6 +445,206 @@ export async function getTrackingLinkDetail(
   };
 }
 
+// ---------- Promoters CRUD ----------
+
+export async function listPromoters(): Promise<Promoter[]> {
+  const sb = createAdminClient();
+  const { data, error } = await sb
+    .from("telegram_promoters")
+    .select("id, name, notes")
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Promoter[];
+}
+
+export async function createPromoter(args: {
+  name: string;
+  notes?: string | null;
+}): Promise<Promoter> {
+  const sb = createAdminClient();
+  const { data, error } = await sb
+    .from("telegram_promoters")
+    .insert({ name: args.name.trim(), notes: args.notes ?? null })
+    .select("id, name, notes")
+    .single();
+  if (error) throw error;
+  return data as Promoter;
+}
+
+// ---------- Tracking links CRUD ----------
+
+export async function createTrackingLinkFromUrl(args: {
+  chat_id: number;
+  invite_link: string;
+  label?: string | null;
+  promoter_id?: string | null;
+  target_joins?: number;
+}): Promise<TrackingLink> {
+  const sb = createAdminClient();
+  const { data, error } = await sb
+    .from("telegram_tracking_links")
+    .insert({
+      chat_id: args.chat_id,
+      invite_link: args.invite_link.trim(),
+      label: args.label?.trim() || null,
+      promoter_id: args.promoter_id ?? null,
+      target_joins: args.target_joins ?? 1000,
+      is_active: true,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as TrackingLink;
+}
+
+/**
+ * Ask Telegram to create a brand new invite link on the channel, then persist it.
+ * Requires bot to be admin with can_invite_users (default when promoted to admin).
+ *
+ * The created link is "bot-owned", so future calls to getChatInviteLink work
+ * on it — unlike user-created links which return 404.
+ */
+export async function createTrackingLinkViaBot(args: {
+  chat_id: number;
+  label?: string | null;
+  promoter_id?: string | null;
+  target_joins?: number;
+}): Promise<TrackingLink> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+
+  // Telegram's `name` param shows up in the admin panel of the channel,
+  // useful for the channel owner to identify the link in their own client.
+  const params = new URLSearchParams({
+    chat_id: String(args.chat_id),
+    creates_join_request: "false",
+  });
+  if (args.label) params.set("name", args.label);
+
+  const res = await fetch(
+    `https://api.telegram.org/bot${token}/createChatInviteLink?${params.toString()}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) {
+    throw new Error(
+      `Telegram createChatInviteLink HTTP ${res.status}: ${await res.text()}`,
+    );
+  }
+  const body = (await res.json()) as {
+    ok: boolean;
+    description?: string;
+    result?: { invite_link: string };
+  };
+  if (!body.ok || !body.result?.invite_link) {
+    throw new Error(
+      `Telegram createChatInviteLink failed: ${body.description ?? "unknown"}`,
+    );
+  }
+
+  return createTrackingLinkFromUrl({
+    chat_id: args.chat_id,
+    invite_link: body.result.invite_link,
+    label: args.label ?? null,
+    promoter_id: args.promoter_id ?? null,
+    target_joins: args.target_joins,
+  });
+}
+
+export interface TrackingLinkPatch {
+  label?: string | null;
+  promoter_id?: string | null;
+  target_joins?: number;
+  is_active?: boolean;
+}
+
+export async function updateTrackingLink(
+  id: string,
+  patch: TrackingLinkPatch,
+): Promise<void> {
+  const sb = createAdminClient();
+  const update: Record<string, unknown> = {};
+  if (patch.label !== undefined) update.label = patch.label;
+  if (patch.promoter_id !== undefined) update.promoter_id = patch.promoter_id;
+  if (patch.target_joins !== undefined) update.target_joins = patch.target_joins;
+  if (patch.is_active !== undefined) update.is_active = patch.is_active;
+  if (Object.keys(update).length === 0) return;
+  const { error } = await sb
+    .from("telegram_tracking_links")
+    .update(update)
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function deactivateTrackingLink(id: string): Promise<void> {
+  await updateTrackingLink(id, { is_active: false });
+}
+
+// ---------- Daily breakdown for one tracking link ----------
+
+export interface DailyBreakdownRow {
+  day: string;            // YYYY-MM-DD
+  joins: number;
+  premium: number;
+  premium_pct: number;
+  top_language: string | null;
+}
+
+export async function getDailyBreakdown(
+  trackingLinkId: string,
+  days = 30,
+): Promise<DailyBreakdownRow[]> {
+  const sb = createAdminClient();
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await sb
+    .from("telegram_joins")
+    .select("ts, raw")
+    .eq("tracking_link_id", trackingLinkId)
+    .gte("ts", since);
+  if (error) throw error;
+
+  const byDay = new Map<
+    string,
+    { joins: number; premium: number; langs: Map<string, number> }
+  >();
+  for (const j of data ?? []) {
+    const day = (j.ts as string).slice(0, 10);
+    const bucket =
+      byDay.get(day) ?? { joins: 0, premium: 0, langs: new Map() };
+    bucket.joins += 1;
+    const user = extractUserFromRaw(j.raw);
+    if (user?.is_premium) bucket.premium += 1;
+    if (user?.language_code) {
+      bucket.langs.set(
+        user.language_code,
+        (bucket.langs.get(user.language_code) ?? 0) + 1,
+      );
+    }
+    byDay.set(day, bucket);
+  }
+
+  // Materialize the last N days (with zeros where no data)
+  const out: DailyBreakdownRow[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    const day = d.toISOString().slice(0, 10);
+    const bucket = byDay.get(day);
+    if (!bucket) {
+      out.push({ day, joins: 0, premium: 0, premium_pct: 0, top_language: null });
+      continue;
+    }
+    const topLang =
+      [...bucket.langs.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    out.push({
+      day,
+      joins: bucket.joins,
+      premium: bucket.premium,
+      premium_pct: bucket.joins > 0 ? (bucket.premium / bucket.joins) * 100 : 0,
+      top_language: topLang,
+    });
+  }
+  return out;
+}
+
 // ---------- helpers ----------
 
 interface TgUserLite {
