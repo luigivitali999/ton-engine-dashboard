@@ -19,6 +19,8 @@ import { CreateLinkDialog } from "./create-link-dialog";
 import { EditLinkDialog } from "./edit-link-dialog";
 import { EditPromoterDialog } from "./edit-promoter-dialog";
 import { SyncButton } from "./sync-button";
+import { Sparkline } from "./sparkline";
+import { Heatmap } from "./heatmap";
 import { AutoRefresh } from "./auto-refresh";
 import { LastUpdated } from "./last-updated";
 
@@ -735,16 +737,11 @@ function LinkDetail({
   const matrix: number[][] = Array.from({ length: 7 }, () =>
     Array(24).fill(0),
   );
-  let maxHeat = 0;
   for (const cell of detail.hourly_heatmap) {
     if (cell.dow >= 1 && cell.dow <= 7) {
       matrix[cell.dow - 1][cell.hour] = cell.joins;
-      if (cell.joins > maxHeat) maxHeat = cell.joins;
     }
   }
-
-  // Daily chart points (max for normalization)
-  const dailyMax = Math.max(1, ...detail.joins_per_day_30d.map((p) => p.joins));
 
   return (
     <div
@@ -979,12 +976,9 @@ function LinkDetail({
       >
         <Panel
           title="Join giornalieri · ultimi 30 giorni"
-          hint="hoover non disponibile"
+          hint="passa il mouse per il dettaglio"
         >
-          <Sparkline
-            points={detail.joins_per_day_30d}
-            max={dailyMax}
-          />
+          <Sparkline points={detail.joins_per_day_30d} />
           <div
             style={{
               marginTop: 4,
@@ -1007,8 +1001,11 @@ function LinkDetail({
             </span>
           </div>
         </Panel>
-        <Panel title="Heatmap orari join" hint="UTC · giorno × ora">
-          <Heatmap matrix={matrix} max={maxHeat} />
+        <Panel
+          title="Heatmap orari join"
+          hint="UTC · passa il mouse sulle celle"
+        >
+          <Heatmap matrix={matrix} />
         </Panel>
       </div>
 
@@ -1211,138 +1208,6 @@ function Panel({
         )}
       </div>
       {children}
-    </div>
-  );
-}
-
-function Sparkline({
-  points,
-  max,
-}: {
-  points: Array<{ day: string; joins: number }>;
-  max: number;
-}) {
-  if (points.length === 0) {
-    return (
-      <div
-        style={{
-          height: 90,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 11,
-          color: "#a8a29e",
-        }}
-      >
-        Nessun dato ancora.
-      </div>
-    );
-  }
-  const w = 400;
-  const h = 90;
-  const stepX = w / Math.max(1, points.length - 1);
-  const path = points
-    .map((p, i) => {
-      const x = i * stepX;
-      const y = h - (p.joins / max) * (h - 6) - 3;
-      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const area = `${path} L${w},${h} L0,${h} Z`;
-
-  return (
-    <div style={{ height: 90 }}>
-      <svg
-        viewBox={`0 0 ${w} ${h}`}
-        preserveAspectRatio="none"
-        style={{ width: "100%", height: "100%", display: "block" }}
-      >
-        <defs>
-          <linearGradient id="spark-grad" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#3ba6f1" stopOpacity="0.4" />
-            <stop offset="100%" stopColor="#3ba6f1" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={area} fill="url(#spark-grad)" />
-        <path d={path} fill="none" stroke="#3ba6f1" strokeWidth={1.5} />
-      </svg>
-    </div>
-  );
-}
-
-function Heatmap({
-  matrix,
-  max,
-}: {
-  matrix: number[][];
-  max: number;
-}) {
-  const dayLabels = ["L", "M", "M", "G", "V", "S", "D"];
-  return (
-    <div>
-      {matrix.map((row, di) => (
-        <div
-          key={di}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "32px repeat(24, 1fr)",
-            gap: 2,
-            marginBottom: 2,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: "#78716c",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            {dayLabels[di]}
-          </div>
-          {row.map((v, hi) => {
-            const level = max === 0 ? 0 : v / max;
-            const bg =
-              level === 0
-                ? "#f0efed"
-                : level < 0.25
-                  ? "rgba(59,166,241,0.15)"
-                  : level < 0.5
-                    ? "rgba(59,166,241,0.35)"
-                    : level < 0.75
-                      ? "rgba(59,166,241,0.6)"
-                      : "rgba(59,166,241,0.85)";
-            return (
-              <div
-                key={hi}
-                style={{
-                  aspectRatio: "1",
-                  borderRadius: 2,
-                  background: bg,
-                }}
-                title={`${dayLabels[di]} ${hi}:00 · ${v} join`}
-              />
-            );
-          })}
-        </div>
-      ))}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "32px repeat(24, 1fr)",
-          gap: 2,
-          marginTop: 4,
-          fontSize: 9,
-          color: "#a8a29e",
-        }}
-      >
-        <div />
-        {Array.from({ length: 24 }, (_, h) => (
-          <div key={h} style={{ textAlign: "center" }}>
-            {h % 6 === 0 ? h : ""}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
