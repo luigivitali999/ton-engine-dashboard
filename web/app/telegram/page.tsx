@@ -17,6 +17,7 @@ import { CopyButton } from "./copy-button";
 import { AddChannelDialog } from "./add-channel-dialog";
 import { CreateLinkDialog } from "./create-link-dialog";
 import { EditLinkDialog } from "./edit-link-dialog";
+import { EditPromoterDialog } from "./edit-promoter-dialog";
 import { SyncButton } from "./sync-button";
 import { AutoRefresh } from "./auto-refresh";
 import { LastUpdated } from "./last-updated";
@@ -778,7 +779,16 @@ function LinkDetail({
               gap: 10,
             }}
           >
-            {link.promoter_name || link.label || "Tracking link"}
+            <span style={{ display: "inline-flex", alignItems: "center" }}>
+              {link.promoter_name || link.label || "Tracking link"}
+              {link.promoter_id && link.promoter_name && (
+                <EditPromoterDialog
+                  promoterId={link.promoter_id}
+                  initialName={link.promoter_name}
+                  initialNotes={link.promoter_notes}
+                />
+              )}
+            </span>
             <span
               style={{
                 fontSize: 10,

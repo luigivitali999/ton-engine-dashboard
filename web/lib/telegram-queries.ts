@@ -195,17 +195,24 @@ export async function listTrackingLinksForChannel(
 
 export async function getTrackingLinkById(
   id: string,
-): Promise<(TrackingLink & { promoter_name: string | null }) | null> {
+): Promise<
+  | (TrackingLink & {
+      promoter_name: string | null;
+      promoter_notes: string | null;
+    })
+  | null
+> {
   const sb = createAdminClient();
   const { data, error } = await sb
     .from("telegram_tracking_links")
-    .select("*, promoter:telegram_promoters(name)")
+    .select("*, promoter:telegram_promoters(name, notes)")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const promoter = (data as unknown as { promoter: { name: string } | null })
-    .promoter;
+  const promoter = (data as unknown as {
+    promoter: { name: string; notes: string | null } | null;
+  }).promoter;
   return {
     id: data.id as string,
     chat_id: data.chat_id as number,
@@ -216,6 +223,7 @@ export async function getTrackingLinkById(
     is_active: data.is_active as boolean,
     created_at: data.created_at as string,
     promoter_name: promoter?.name ?? null,
+    promoter_notes: promoter?.notes ?? null,
   };
 }
 
@@ -350,7 +358,10 @@ export async function getChannelKpis(chatId: number): Promise<ChannelKpis> {
 // ---------- Tracking-link detail ----------
 
 export interface TrackingLinkDetail {
-  link: TrackingLink & { promoter_name: string | null };
+  link: TrackingLink & {
+    promoter_name: string | null;
+    promoter_notes: string | null;
+  };
   total_joins: number;
   joins_7d: number;
   joins_30d: number;
@@ -487,6 +498,27 @@ export async function createPromoter(args: {
     .single();
   if (error) throw error;
   return data as Promoter;
+}
+
+export interface PromoterPatch {
+  name?: string;
+  notes?: string | null;
+}
+
+export async function updatePromoter(
+  id: string,
+  patch: PromoterPatch,
+): Promise<void> {
+  const sb = createAdminClient();
+  const update: Record<string, unknown> = {};
+  if (patch.name !== undefined) update.name = patch.name.trim();
+  if (patch.notes !== undefined) update.notes = patch.notes;
+  if (Object.keys(update).length === 0) return;
+  const { error } = await sb
+    .from("telegram_promoters")
+    .update(update)
+    .eq("id", id);
+  if (error) throw error;
 }
 
 // ---------- Tracking links CRUD ----------
