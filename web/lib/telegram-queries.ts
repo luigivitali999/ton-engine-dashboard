@@ -631,6 +631,127 @@ export async function deactivateTrackingLink(id: string): Promise<void> {
 
 // ---------- Daily breakdown for one tracking link ----------
 
+// ---------- Channel cumulative trend (one line per tracking link) ----------
+
+const TREND_PALETTE = [
+  "#3ba6f1", // blue (accent)
+  "#a855f7", // purple
+  "#f59e0b", // amber
+  "#16a34a", // green
+  "#94a3b8", // slate
+  "#dc2626", // red
+  "#0891b2", // cyan
+  "#db2777", // pink
+];
+
+export interface ChannelTrendLine {
+  tracking_link_id: string;
+  label: string;
+  promoter_name: string | null;
+  color: string;
+  total_joins: number;
+  points: Array<{ day: string; cumulative: number }>;
+}
+
+/**
+ * For each tracking link in the channel, return its cumulative join count for
+ * each of the last `days` days. Lines are sorted by total_joins desc so the
+ * color assignment from TREND_PALETTE is stable (#1 = blue, #2 = purple, ...).
+ *
+ * Strategy: pull all joins for the channel in the window + the lifetime total
+ * per link, then compute the running cumulative starting at (total - in_window).
+ * This means the first point reflects the "pre-window" baseline and the curve
+ * grows toward the current total at "today".
+ */
+export async function getChannelCumulativeTrend(
+  chatId: number,
+  days = 30,
+): Promise<ChannelTrendLine[]> {
+  const sb = createAdminClient();
+
+  const { data: links, error: linksErr } = await sb
+    .from("telegram_tracking_links")
+    .select("id, label, promoter:telegram_promoters(name)")
+    .eq("chat_id", chatId);
+  if (linksErr) throw linksErr;
+  if (!links || links.length === 0) return [];
+
+  // Lifetime totals per link (all-time)
+  const linkIds = links.map((l) => l.id as string);
+  const totalByLink = new Map<string, number>();
+  for (const id of linkIds) totalByLink.set(id, 0);
+
+  const { data: totalsRows, error: totalsErr } = await sb
+    .from("telegram_joins")
+    .select("tracking_link_id")
+    .eq("chat_id", chatId)
+    .not("tracking_link_id", "is", null);
+  if (totalsErr) throw totalsErr;
+  for (const r of totalsRows ?? []) {
+    const id = r.tracking_link_id as string;
+    totalByLink.set(id, (totalByLink.get(id) ?? 0) + 1);
+  }
+
+  // Joins inside the window (only the ones we need for the trend curve)
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const { data: windowJoins, error: winErr } = await sb
+    .from("telegram_joins")
+    .select("tracking_link_id, ts")
+    .eq("chat_id", chatId)
+    .gte("ts", since)
+    .not("tracking_link_id", "is", null);
+  if (winErr) throw winErr;
+
+  // Aggregate window joins by (link, day)
+  const dailyByLink = new Map<string, Map<string, number>>();
+  for (const j of windowJoins ?? []) {
+    const id = j.tracking_link_id as string;
+    const day = (j.ts as string).slice(0, 10);
+    const m = dailyByLink.get(id) ?? new Map<string, number>();
+    m.set(day, (m.get(day) ?? 0) + 1);
+    dailyByLink.set(id, m);
+  }
+
+  // Materialize day buckets [today-days+1 ... today]
+  const dayLabels: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    dayLabels.push(d.toISOString().slice(0, 10));
+  }
+
+  // Sort links by total desc so palette order is stable
+  const sorted = [...links].sort((a, b) => {
+    const ta = totalByLink.get(a.id as string) ?? 0;
+    const tb = totalByLink.get(b.id as string) ?? 0;
+    return tb - ta;
+  });
+
+  return sorted.map((l, idx) => {
+    const id = l.id as string;
+    const total = totalByLink.get(id) ?? 0;
+    const dailyMap = dailyByLink.get(id) ?? new Map<string, number>();
+    const sumInWindow = Array.from(dailyMap.values()).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    let running = total - sumInWindow; // baseline before the window
+    const points = dayLabels.map((day) => {
+      running += dailyMap.get(day) ?? 0;
+      return { day, cumulative: running };
+    });
+    const promoter = (l as unknown as { promoter: { name: string } | null })
+      .promoter;
+    return {
+      tracking_link_id: id,
+      label: (l.label as string) || "",
+      promoter_name: promoter?.name ?? null,
+      color: TREND_PALETTE[idx % TREND_PALETTE.length],
+      total_joins: total,
+      points,
+    };
+  });
+}
+
 export interface DailyBreakdownRow {
   day: string;            // YYYY-MM-DD
   joins: number;

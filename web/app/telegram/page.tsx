@@ -7,6 +7,7 @@ import {
   getChannelKpis,
   getTrackingLinkDetail,
   getDailyBreakdown,
+  getChannelCumulativeTrend,
   type TrackingLinkRow,
   type Channel,
   type ChannelKpis,
@@ -21,6 +22,7 @@ import { EditPromoterDialog } from "./edit-promoter-dialog";
 import { SyncButton } from "./sync-button";
 import { Sparkline } from "./sparkline";
 import { Heatmap } from "./heatmap";
+import { TrendChart } from "./trend-chart";
 import { AutoRefresh } from "./auto-refresh";
 import { LastUpdated } from "./last-updated";
 
@@ -47,12 +49,14 @@ export default async function TelegramPage({
   const channel = await getChannel(selectedChatId);
   if (!channel) return <EmptyState />;
 
-  const [memberCountLive, links, kpis] = await Promise.all([
+  const [memberCountLive, links, kpis, trend] = await Promise.all([
     refreshLiveMemberCount(selectedChatId),
     listTrackingLinksForChannel(selectedChatId),
     getChannelKpis(selectedChatId),
+    getChannelCumulativeTrend(selectedChatId, 30),
   ]);
   kpis.total_member_count_live = memberCountLive;
+  const colorById = new Map(trend.map((l) => [l.tracking_link_id, l.color]));
 
   const selectedLinkId =
     params.link ?? (links.length > 0 ? links[0].id : null);
@@ -89,12 +93,14 @@ export default async function TelegramPage({
         </div>
         <ChannelHeader channel={channel} />
         <ChannelKpiStrip channel={channel} kpis={kpis} />
+        <TrendChart lines={trend} days={30} />
         <TrackingLinksTable
           links={links}
           activeLinkId={selectedLinkId}
           activeChatId={selectedChatId}
           totalChannelJoins={kpis.total_joins_tracked_all_time}
           orphanCount={kpis.orphan_joins_total}
+          colorById={colorById}
         />
         {detail && (
           <LinkDetail
@@ -406,12 +412,14 @@ function TrackingLinksTable({
   activeChatId,
   totalChannelJoins,
   orphanCount,
+  colorById,
 }: {
   links: TrackingLinkRow[];
   activeLinkId: string | null;
   activeChatId: number;
   totalChannelJoins: number;
   orphanCount: number;
+  colorById: Map<string, string>;
 }) {
   const totalForQuota = totalChannelJoins + orphanCount;
 
@@ -514,6 +522,7 @@ function TrackingLinksTable({
                           height: 28,
                           borderRadius: "50%",
                           background:
+                            colorById.get(l.id) ??
                             "linear-gradient(135deg, #3ba6f1, #5d7af2)",
                           color: "white",
                           display: "flex",
@@ -570,6 +579,7 @@ function TrackingLinksTable({
                           height: "100%",
                           width: `${progress}%`,
                           background:
+                            colorById.get(l.id) ??
                             "linear-gradient(90deg, #3ba6f1, #5d7af2)",
                           borderRadius: 3,
                         }}
