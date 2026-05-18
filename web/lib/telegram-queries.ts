@@ -231,17 +231,35 @@ export async function setTrackingLinkTarget(
   if (error) throw error;
 }
 
+/**
+ * Find a tracking link by its invite_link, robust to Telegram's truncation.
+ *
+ * Background: Telegram redacts invite links that the bot itself did NOT create
+ * before sending them in chat_member updates. The redacted form keeps the
+ * first ~8 chars of the hash and appends literal "..." (e.g.
+ * "https://t.me/+cITTYvjl..."). Doing an equality match against the full link
+ * stored in our DB therefore always misses, and the join ends up orphaned.
+ *
+ * Strategy:
+ *  - If the incoming link ends with "...", strip them and do a prefix LIKE.
+ *  - Otherwise do the exact match (covers bot-created links, which arrive whole).
+ *  - When multiple tracking links share a prefix, prefer an active one.
+ */
 export async function findTrackingLinkByInvite(
   inviteLink: string,
 ): Promise<TrackingLink | null> {
   const sb = createAdminClient();
-  const { data, error } = await sb
-    .from("telegram_tracking_links")
-    .select("*")
-    .eq("invite_link", inviteLink)
-    .maybeSingle();
+  const isTruncated = inviteLink.endsWith("...");
+  const stem = isTruncated ? inviteLink.slice(0, -3) : inviteLink;
+
+  const query = sb.from("telegram_tracking_links").select("*");
+  const { data, error } = await (isTruncated
+    ? query.like("invite_link", `${stem}%`)
+    : query.eq("invite_link", stem));
   if (error) throw error;
-  return (data as TrackingLink) ?? null;
+  const rows = (data ?? []) as TrackingLink[];
+  if (rows.length === 0) return null;
+  return rows.find((r) => r.is_active) ?? rows[0];
 }
 
 // ---------- Joins (writes from webhook) ----------
