@@ -19,8 +19,10 @@ import { CreateLinkDialog } from "./create-link-dialog";
 import { EditLinkDialog } from "./edit-link-dialog";
 import { SyncButton } from "./sync-button";
 import { AutoRefresh } from "./auto-refresh";
+import { LastUpdated } from "./last-updated";
 
 const BOT_USERNAME = "babysujanbot";
+const POLL_INTERVAL_MS = 10_000;
 
 export const dynamic = "force-dynamic";
 
@@ -66,13 +68,22 @@ export default async function TelegramPage({
         gap: 20,
       }}
     >
-      <AutoRefresh intervalMs={60_000} />
+      <AutoRefresh intervalMs={POLL_INTERVAL_MS} />
       <Sidebar
         channels={channels}
         activeChatId={selectedChatId}
         activeLinkId={selectedLinkId}
       />
       <main style={{ minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: 8,
+          }}
+        >
+          <LastUpdated at={new Date().toISOString()} />
+        </div>
         <ChannelHeader channel={channel} />
         <ChannelKpiStrip channel={channel} kpis={kpis} />
         <TrackingLinksTable
