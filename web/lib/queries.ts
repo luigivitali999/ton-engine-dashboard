@@ -359,3 +359,116 @@ export async function fetchDailyTimeSeries(
   }
   return out;
 }
+
+/**
+ * Per-creator daily delta series within the selected range.
+ *
+ * Returns a map of creator_id → array of TimeSeriesPoint (one per day).
+ * Computed in a single query from the hybrid view (real where available,
+ * synthetic fallback otherwise), then aggregated per (creator, date).
+ *
+ * Caller chooses which creators to filter by — typically all visible creators
+ * in the current dashboard view. Returns empty arrays for creators with no
+ * data in the range.
+ */
+export async function fetchCreatorTimeSeries(
+  creatorIds: string[],
+  range: TimeRange,
+): Promise<Map<string, TimeSeriesPoint[]>> {
+  const out = new Map<string, TimeSeriesPoint[]>();
+  if (creatorIds.length === 0) return out;
+
+  const supabase = createAdminClient();
+  const bounds = rangeBounds(range);
+
+  let q = supabase
+    .from("v_daily_cumulative_hybrid")
+    .select(
+      "snapshot_date, creator_id, sub_count, earnings_net, earnings_gross, click_count, is_real",
+    )
+    .eq("excluded", false)
+    .in("creator_id", creatorIds);
+
+  if (bounds) {
+    q = q.gte("snapshot_date", bounds.start).lte("snapshot_date", bounds.end);
+  } else {
+    const cap = new Date();
+    cap.setUTCDate(cap.getUTCDate() - 365);
+    q = q.gte("snapshot_date", cap.toISOString().slice(0, 10));
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  // Aggregate by (creator_id, snapshot_date) — sum across that creator's links for the day
+  type Acc = {
+    cum_subs: number;
+    cum_net: number;
+    cum_gross: number;
+    cum_clicks: number;
+    real_count: number;
+    total_count: number;
+  };
+  const byCreatorDate = new Map<string, Map<string, Acc>>();
+
+  for (const row of data ?? []) {
+    const r = row as {
+      snapshot_date: string;
+      creator_id: string;
+      sub_count: number | string | null;
+      earnings_net: number | string | null;
+      earnings_gross: number | string | null;
+      click_count: number | string | null;
+      is_real: boolean;
+    };
+    let dateMap = byCreatorDate.get(r.creator_id);
+    if (!dateMap) {
+      dateMap = new Map();
+      byCreatorDate.set(r.creator_id, dateMap);
+    }
+    const cur = dateMap.get(r.snapshot_date) ?? {
+      cum_subs: 0,
+      cum_net: 0,
+      cum_gross: 0,
+      cum_clicks: 0,
+      real_count: 0,
+      total_count: 0,
+    };
+    cur.cum_subs += parseFloat(String(r.sub_count ?? "0"));
+    cur.cum_net += parseFloat(String(r.earnings_net ?? "0"));
+    cur.cum_gross += parseFloat(String(r.earnings_gross ?? "0"));
+    cur.cum_clicks += parseFloat(String(r.click_count ?? "0"));
+    cur.total_count += 1;
+    if (r.is_real) cur.real_count += 1;
+    dateMap.set(r.snapshot_date, cur);
+  }
+
+  // Convert each creator's per-day cumulative into TimeSeriesPoint daily deltas
+  for (const [creatorId, dateMap] of byCreatorDate.entries()) {
+    const sorted = Array.from(dateMap.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+    let prevSubs = 0;
+    let prevNet = 0;
+    let prevGross = 0;
+    let prevClicks = 0;
+    const series: TimeSeriesPoint[] = [];
+    for (const [date, acc] of sorted) {
+      series.push({
+        date,
+        subs: acc.cum_subs - prevSubs,
+        revenue_net: acc.cum_net - prevNet,
+        revenue_gross: acc.cum_gross - prevGross,
+        clicks: acc.cum_clicks - prevClicks,
+        is_real: acc.total_count > 0 && acc.real_count / acc.total_count >= 0.8,
+      });
+      prevSubs = acc.cum_subs;
+      prevNet = acc.cum_net;
+      prevGross = acc.cum_gross;
+      prevClicks = acc.cum_clicks;
+    }
+    out.set(creatorId, series);
+  }
+
+  return out;
+}

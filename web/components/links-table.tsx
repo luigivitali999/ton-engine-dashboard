@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, ChevronUp, ChevronDown } from "lucide-react";
 import type { LinkAggregate } from "@/lib/types";
+import type { TimeSeriesPoint } from "@/lib/queries";
 import { ExcludeButton } from "@/components/exclude-button";
+import { CreatorMiniChart } from "@/components/creator-mini-chart";
 
 function fmtUSD(n: number) {
   return n.toLocaleString("en-US", {
@@ -127,12 +129,18 @@ export function LinksTable({
   excludedCount,
   showExcluded,
   currentParams,
+  creatorSeries,
+  rangeLabel,
 }: {
   rows: LinkAggregate[];
   groupByCreator: boolean;
   excludedCount: number;
   showExcluded: boolean;
   currentParams: { range?: string; creators?: string; showExcluded?: string };
+  /** Per-creator daily delta series, keyed by creator_id. Used by mini-charts in expanded rows. */
+  creatorSeries: Map<string, TimeSeriesPoint[]>;
+  /** Human label for the current range, e.g. "ultimi 7 giorni". */
+  rangeLabel: string;
 }) {
   // Local exclusion state — tracks links the user toggled in this session,
   // so we can hide/reveal them without a full page refresh.
@@ -441,6 +449,8 @@ export function LinksTable({
                     onToggle={() => toggleExpand(g.creator_id)}
                     onExcludeChange={handleExcludeChange}
                     isLinkExcluded={effectiveExcludedFlag}
+                    series={creatorSeries.get(g.creator_id) ?? []}
+                    rangeLabel={rangeLabel}
                   />
                 ))
               : flatSorted.map((r) => (
@@ -518,12 +528,16 @@ function RenderGroup({
   onToggle,
   onExcludeChange,
   isLinkExcluded,
+  series,
+  rangeLabel,
 }: {
   group: Group;
   expanded: boolean;
   onToggle: () => void;
   onExcludeChange: (linkId: string, excluded: boolean) => void;
   isLinkExcluded: (r: LinkAggregate) => boolean;
+  series: TimeSeriesPoint[];
+  rangeLabel: string;
 }) {
   return (
     <>
@@ -595,6 +609,17 @@ function RenderGroup({
         </Td>
         <td />
       </tr>
+      {expanded && (
+        <tr
+          style={{
+            background: "rgba(59,166,241,0.03)",
+          }}
+        >
+          <td colSpan={9} style={{ padding: "4px 18px 4px 32px" }}>
+            <CreatorMiniChart data={series} rangeLabel={rangeLabel} />
+          </td>
+        </tr>
+      )}
       {expanded &&
         group.rows.map((r) => (
           <RenderRow

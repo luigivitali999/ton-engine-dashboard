@@ -6,6 +6,7 @@ import { TrendChart } from "@/components/trend-chart";
 import { EfficiencyQuadrant } from "@/components/efficiency-quadrant";
 import {
   countExcludedLinks,
+  fetchCreatorTimeSeries,
   fetchDailyTimeSeries,
   fetchLinkAggregates,
   fetchRangeAggregates,
@@ -83,6 +84,14 @@ export default async function DashboardPage({
       range,
     ),
   ]);
+
+  // Now that we know which creators are actually visible (from the link list),
+  // fetch per-creator time series for the mini-charts in the expanded table rows.
+  // Distinct creator IDs from the rendered links.
+  const visibleCreatorIds = Array.from(
+    new Set(links.map((l) => l.creator_id)),
+  );
+  const creatorSeries = await fetchCreatorTimeSeries(visibleCreatorIds, range);
 
   // Range-aware KPIs (Subs / Net / Gross / Clicks) — sum of deltas across the
   // selected time window. For "all" range, these become lifetime totals.
@@ -233,6 +242,8 @@ export default async function DashboardPage({
           creators: sp.creators,
           showExcluded: sp.showExcluded,
         }}
+        creatorSeries={creatorSeries}
+        rangeLabel={RANGE_LABELS[range]}
       />
     </div>
   );
